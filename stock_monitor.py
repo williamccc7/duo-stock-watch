@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 import smtplib
+import ssl
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -77,7 +78,8 @@ def parse_stock(data):
 def send_gmail(title, message):
     sender = os.environ.get("EMAIL_SENDER", "").strip()
     recipient = os.environ.get("EMAIL_TO", "").strip()
-    password = os.environ.get("DUO_SMTP_APP_PASSWORD", "").strip()
+    # Google displays app passwords grouped with spaces; SMTP needs the raw 16 characters.
+    password = "".join(os.environ.get("DUO_SMTP_APP_PASSWORD", "").split())
     if not (sender and recipient and password):
         return False
     mail = EmailMessage()
@@ -85,9 +87,28 @@ def send_gmail(title, message):
     mail["To"] = recipient
     mail["Subject"] = title
     mail.set_content(message + "\n\nApple: " + BUY_URL)
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
-        smtp.login(sender, password)
-        smtp.send_message(mail)
+
+    # First try STARTTLS/587; try SSL/465 only for transport disconnects.
+    context = ssl.create_default_context()
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=25) as smtp:
+            smtp.ehlo()
+            smtp.starttls(context=context)
+            smtp.ehlo()
+            smtp.login(sender, password)
+            smtp.send_message(mail)
+    except (smtplib.SMTPServerDisconnected, TimeoutError, OSError) as first_error:
+        log("SMTP 587 transport error; retrying SSL port 465")
+        try:
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=25, context=context) as smtp:
+                smtp.login(sender, password)
+                smtp.send_message(mail)
+        except (smtplib.SMTPServerDisconnected, TimeoutError, OSError) as second_error:
+            raise RuntimeError(
+                "Gmail SMTP connection failed on both ports 587 and 465 "
+                f"({type(first_error).__name__}, {type(second_error).__name__}). "
+                "Google may be closing connections from GitHub runners."
+            ) from second_error
     return True
 
 
