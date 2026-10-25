@@ -1,0 +1,56 @@
+name: Evergreen Walk iPhone Duo stock
+
+on:
+  schedule:
+    - cron: '7,17,27,37,47,57 * * * *'
+  workflow_dispatch:
+    inputs:
+      test_notification:
+        description: 'Send a test notification only (no inventory check)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+concurrency:
+  group: duo-stock-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Restore previous stock state
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.duo_stock_watch/state.json
+          key: stock-state-${{ github.run_id }}
+          restore-keys: |
+            stock-state-
+      - name: Check stock or send test alert
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          DUO_SMTP_APP_PASSWORD: ${{ secrets.DUO_SMTP_APP_PASSWORD }}
+          TEST_NOTIFICATION: ${{ inputs.test_notification || 'false' }}
+        run: |
+          if [ "$TEST_NOTIFICATION" = "true" ]; then
+            python stock_monitor.py --test-notification
+          else
+            python stock_monitor.py
+          fi
+      - name: Save stock state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.duo_stock_watch/state.json
+          key: stock-state-${{ github.run_id }}
