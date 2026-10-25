@@ -74,30 +74,6 @@ def parse_stock(data):
     raise ValueError("Unrecognized or ineligible pickup status: " + repr(status))
 
 
-def send_ntfy(title, message):
-    topic = os.environ.get("NTFY_TOPIC", "").strip()
-    if not topic:
-        return False
-    payload = json.dumps({
-        "topic": topic,
-        "title": title,
-        "message": message,
-        "priority": 5,
-        "click": BUY_URL,
-        "tags": ["iphone", "tada"],
-    }).encode("utf-8")
-    request = urllib.request.Request(
-        "https://ntfy.sh/",
-        data=payload,
-        headers={"Content-Type": "application/json", "User-Agent": "duo-stock-watch/1.0"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        if response.status not in (200, 201, 202):
-            raise RuntimeError("ntfy HTTP status " + str(response.status))
-    return True
-
-
 def send_gmail(title, message):
     sender = os.environ.get("EMAIL_SENDER", "").strip()
     recipient = os.environ.get("EMAIL_TO", "").strip()
@@ -116,19 +92,17 @@ def send_gmail(title, message):
 
 
 def notify(title, message):
-    sent = []
-    failures = []
-    for label, fn in [("ntfy", send_ntfy), ("Gmail", send_gmail)]:
-        try:
-            if fn(title, message):
-                sent.append(label)
-        except Exception as exc:
-            failures.append(label + ": " + str(exc))
-    for failure in failures:
-        log("Notification channel error: " + failure)
-    if not sent:
-        raise RuntimeError("No notification delivered. Check repository secrets and notification setup.")
-    log("Notifications delivered via " + ", ".join(sent))
+    """Deliver only through Gmail. Do not use ntfy."""
+    if not send_gmail(title, message):
+        raise RuntimeError("Gmail secrets missing: EMAIL_SENDER, EMAIL_TO, DUO_SMTP_APP_PASSWORD")
+    log("Gmail notification sent")
+
+
+def require_gmail_secrets():
+    required = ("EMAIL_SENDER", "EMAIL_TO", "DUO_SMTP_APP_PASSWORD")
+    missing = [name for name in required if not os.environ.get(name, "").strip()]
+    if missing:
+        raise RuntimeError("Missing GitHub Actions secrets: " + ", ".join(missing))
 
 
 def read_state():
@@ -148,12 +122,7 @@ def write_state(state):
 
 
 def check():
-    if not os.environ.get("NTFY_TOPIC", "").strip() and not all(
-        os.environ.get(name, "").strip()
-        for name in ("EMAIL_SENDER", "EMAIL_TO", "DUO_SMTP_APP_PASSWORD")
-    ):
-        log("No notification secrets configured yet; skipping check")
-        return
+    require_gmail_secrets()
     available, quote = fetch_stock()
     state = read_state()
     log("Apple Evergreen Walk pickup: " + ("AVAILABLE" if available else "unavailable") + " / " + quote)
@@ -166,7 +135,7 @@ def check():
             "No trade-in; connect to any carrier later. Confirm during Apple checkout.\n"
             "Stock may change quickly.\n" + BUY_URL
         )
-        notify("iPhone Duo AVAILABLE at Evergreen Walk", message)
+        notify("🚨 iPhone Duo AVAILABLE — Evergreen Walk", message)
         state["was_available"] = True
     else:
         log("Stock still available; no repeated alert")
@@ -179,8 +148,9 @@ def main():
     parser.add_argument("--test-notification", action="store_true")
     args = parser.parse_args()
     if args.test_notification:
-        notify("iPhone Duo stock monitor TEST",
-               "Test only: the cloud monitor can send notifications. This does NOT mean the phone is in stock.")
+        require_gmail_secrets()
+        notify("Gmail TEST — iPhone Duo Evergreen Walk",
+               "This is a test email sent by your GitHub Actions stock monitor. It does NOT mean the iPhone is in stock.")
     else:
         check()
 
