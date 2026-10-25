@@ -1,0 +1,1 @@
+Trigger Gmail SMTP diagnostic after improving TLS compatibility. This sends only a test email, does not query inventory.
