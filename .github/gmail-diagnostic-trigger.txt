@@ -1,1 +1,1 @@
-Trigger Gmail SMTP diagnostic after improving TLS compatibility. This sends only a test email, does not query inventory.
+Gmail SMTP diagnostic retry #2. User confirmed sender and recipient are the same Gmail account and that the app password is correct. Sends only test email; no stock query.
