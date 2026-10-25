@@ -1,1 +1,0 @@
-Trigger ntfy test notification only. No inventory lookup. Test run: second requested notification.
