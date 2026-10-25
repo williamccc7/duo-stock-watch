@@ -1,4 +1,4 @@
-name: Evergreen Walk iPhone Duo stock
+name: Evergreen Walk iPhone Duo stock (Gmail)
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       test_notification:
-        description: 'Send a test notification only (no inventory check)'
+        description: 'Send a Gmail test email only (no inventory check)'
         required: false
         type: boolean
         default: false
@@ -35,9 +35,8 @@ jobs:
           key: stock-state-${{ github.run_id }}
           restore-keys: |
             stock-state-
-      - name: Check stock or send test alert
+      - name: Check stock or send Gmail test email
         env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           DUO_SMTP_APP_PASSWORD: ${{ secrets.DUO_SMTP_APP_PASSWORD }}
