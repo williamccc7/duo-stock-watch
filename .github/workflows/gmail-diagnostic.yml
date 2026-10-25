@@ -1,0 +1,26 @@
+name: Gmail notification diagnostic
+
+on:
+  push:
+    paths:
+      - ".github/gmail-diagnostic-trigger.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gmail-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Send Gmail test (no inventory check)
+        env:
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          DUO_SMTP_APP_PASSWORD: ${{ secrets.DUO_SMTP_APP_PASSWORD }}
+        run: python stock_monitor.py --test-notification
