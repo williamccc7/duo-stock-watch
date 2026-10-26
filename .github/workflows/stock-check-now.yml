@@ -1,0 +1,24 @@
+name: On-demand Apple pickup check
+on:
+  push:
+    paths:
+      - ".github/stock-check-now-trigger.txt"
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check exact Apple pickup SKU
+        run: |
+          python - <<'PY'
+          import stock_monitor
+          available, quote = stock_monitor.fetch_stock()
+          print("EVERGREEN_WALK_PICKUP_STATUS:", "AVAILABLE" if available else "UNAVAILABLE")
+          print("APPLE_PICKUP_QUOTE:", quote)
+          PY
