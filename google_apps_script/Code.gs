@@ -1,5 +1,5 @@
 /**
- * iPhone Duo · Apple Evergreen Walk · 1-minute pickup stock watch
+ * iPhone Duo · Apple Evergreen Walk · 5-minute pickup stock watch
  *
  * Paste into a private Google Apps Script project linked to your Gmail account.
  * Uses no passwords and never attempts to purchase a phone.
@@ -7,7 +7,7 @@
  * After pasting:
  *   1. Run testEmail() and authorize Google permissions.
  *   2. Run checkStock() once; review Execution log.
- *   3. Run startEveryMinute() once to install a 1-minute trigger.
+ *   3. Run startEveryFiveMinutes() once to install a 5-minute trigger.
  *   4. Later, run stopMonitoring() to stop.
  */
 
@@ -33,9 +33,9 @@ function recipient_() {
 function testEmail() {
   MailApp.sendEmail({
     to: recipient_(),
-    subject: "TEST — iPhone Duo 1-minute monitor",
+    subject: "TEST — iPhone Duo 5-minute monitor",
     body: "This is a test message only. The phone has NOT been confirmed in stock.\n" +
-          "After receiving this, run checkStock() once, then startEveryMinute()."
+          "After receiving this, run checkStock() once, then startEveryFiveMinutes()."
   });
   console.log("Test email submitted to Gmail.");
 }
@@ -153,15 +153,15 @@ function checkStock() {
   }
 }
 
-function startEveryMinute() {
-  // Idempotent: delete any previous copy so it cannot alert twice per minute.
+function startEveryFiveMinutes() {
+  // Idempotent: delete any previous copy so it cannot alert twice per interval.
   for (const trigger of ScriptApp.getProjectTriggers()) {
     if (trigger.getHandlerFunction() === "checkStock") {
       ScriptApp.deleteTrigger(trigger);
     }
   }
-  ScriptApp.newTrigger("checkStock").timeBased().everyMinutes(1).create();
-  console.log("1-minute Google Apps Script trigger installed.");
+  ScriptApp.newTrigger("checkStock").timeBased().everyMinutes(5).create();
+  console.log("5-minute Google Apps Script trigger installed.");
 }
 
 function stopMonitoring() {
@@ -170,7 +170,7 @@ function stopMonitoring() {
       ScriptApp.deleteTrigger(trigger);
     }
   }
-  console.log("1-minute monitor stopped.");
+  console.log("5-minute monitor stopped.");
 }
 
 function showStatus() {
