@@ -48,6 +48,14 @@ function checkStock() {
   }
   const state = PropertiesService.getScriptProperties();
   try {
+    // A 541 can signal Apple temporarily blocking this shared network route.
+    // Do not hammer the service with immediate retries.
+    const cooldownUntil = Number(state.getProperty("cooldownUntil") || "0");
+    if (Date.now() < cooldownUntil) {
+      console.warn("Apple HTTP 541 cooldown active; next eligible query after " +
+                   new Date(cooldownUntil).toISOString());
+      return;
+    }
     const query = "?pl=true&location=" + encodeURIComponent(CONFIG.zipCode) +
                   "&parts.0=" + encodeURIComponent(CONFIG.sku);
     const res = UrlFetchApp.fetch(CONFIG.appleUrl + query, {
@@ -124,13 +132,29 @@ function checkStock() {
       wasAvailable: String(available),
       lastSuccessfulCheck: new Date().toISOString(),
       lastPickupDisplay: item.pickupDisplay,
-      consecutiveErrors: "0"
+      consecutiveErrors: "0",
+      consecutive541: "0",
+      cooldownUntil: "0"
     });
   } catch (err) {
     console.error("Inventory check failed: " + String(err));
     const errors = Number(state.getProperty("consecutiveErrors") || 0) + 1;
     state.setProperty("consecutiveErrors", String(errors));
     const now = Date.now();
+    const is541 = String(err).includes("Apple returned HTTP 541");
+    const consecutive541 = is541 ?
+      Number(state.getProperty("consecutive541") || "0") + 1 : 0;
+    state.setProperty("consecutive541", String(consecutive541));
+    if (consecutive541 >= 2) {
+      // 2nd consecutive 541: 15-min cooldown; 3rd: 30; later: 60.
+      // During cooldown, availability is unknown (never assumed out of stock).
+      const cooldownMinutes = Math.min(60, 15 * Math.pow(2, consecutive541 - 2));
+      const until = now + cooldownMinutes * 60 * 1000;
+      state.setProperty("cooldownUntil", String(until));
+      console.warn("Apple HTTP 541 received " + consecutive541 +
+                   " times consecutively; pausing queries for " +
+                   cooldownMinutes + " minutes, until " + new Date(until).toISOString());
+    }
     const lastAlert = Number(state.getProperty("lastErrorMail") || "0");
 
     // If Apple changes the endpoint, explain the outage without spamming Gmail.
@@ -178,6 +202,10 @@ function showStatus() {
   console.log("Last successful check: " + (props.lastSuccessfulCheck || "never"));
   console.log("Pickup status: " + (props.lastPickupDisplay || "unknown"));
   console.log("Consecutive errors: " + (props.consecutiveErrors || "0"));
+  console.log("Consecutive HTTP 541: " + (props.consecutive541 || "0"));
+  const cooldownUntil = Number(props.cooldownUntil || "0");
+  console.log("Cooldown: " +
+    (cooldownUntil > Date.now() ? "until " + new Date(cooldownUntil).toISOString() : "not active"));
   console.log("Triggers installed: " + ScriptApp.getProjectTriggers()
     .filter(t => t.getHandlerFunction() === "checkStock").length);
 }
