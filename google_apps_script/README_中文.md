@@ -34,3 +34,17 @@ Google Apps Script 官方允许 5 分钟定时器，且无需 Mac 开机、无�
 - 2026 年 Google 个人账户的 Apps Script 免费额度包括 URL Fetch 每日 20,000 次、触发器总运行时间每日 90 分钟，以及邮件收件人数每日 100。288 次/日通常低于 URL Fetch 配额，但如果单次运行较慢，**可能耗尽每日触发器运行时长**。
 - 如果收到限额、超时或苹果网站响应异常，需要调整运行频率或换云端方案。
 - 监控仅限 Apple Evergreen Walk (R613)、Star White、256GB (MK1E4LL/A)，No Trade-in 和 Connect to any carrier later 应在结账时选择确认。
+
+## 2026-10-30：HTTP 541 偶发错误处理
+
+Apple 有时会拒绝自动查询并返回 HTTP 541；这不表示缺货。现在代码将一次失败留给下一轮 5 分钟定时查询，不会马上重试。如果连续出现 2 次 541，就暂停请求 15 分钟；恢复查询后若仍然失败则暂停 30 分钟，再失败最多冷却 60 分钟。期间仍然由 Google 按 5 分钟启动脚本，但会跳过网络请求，以减少持续触发 Apple 限制。连续失败会触发最多每 6 小时一次的邮件警报。**冷却期间可能错过短暂补货**，这是自动限制与高频查询之间的取舍。
+
+已部署在 Google Apps Script 的用户需手动更新，因为 GitHub 文件不会自动同步至 Google：
+
+1. 在 Google Apps Script 中打开现有 `iPhone Duo Stock Monitor` 项目，选择编辑器中的 `Code.gs`。
+2. 打开 GitHub 的 `google_apps_script/Code.gs`，复制完整文件。
+3. 在 Apps Script 编辑器内全选旧代码、粘贴新版，按 Command + S 保存。
+4. **不要再运行 `startEveryFiveMinutes`**，原来的 `checkStock` 定时触发器依然存在。
+5. 可以选 `showStatus` 点 Run，或查看 Executions 中的日志是否出现 `Currently unavailable.`、`Apple HTTP 541 cooldown active` 等。
+
+如果 541 频繁且长期无法恢复，按项目情况考虑降低到每 10 分钟（需要修改每 5 分钟的触发器），或改用 Apple 官方页面人工确认。该接口并非 Apple 公开承诺稳定的 API。
