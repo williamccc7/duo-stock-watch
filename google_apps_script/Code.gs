@@ -173,7 +173,7 @@ function checkStock() {
       ? Number(props.getProperty("consecutive541") || "0") + 1 : 0;
     props.setProperty("consecutive541", String(consecutive541));
     if (consecutive541 >= 2) {
-      const minutes = Math.min(60, 15 * Math.pow(2, consecutive541 - 2));
+      const minutes = Math.min(15, 5 * Math.pow(2, consecutive541 - 2));
       const until = now + minutes * 60000;
       props.setProperty("cooldownUntil", String(until));
       console.warn("HTTP 541 repeated " + consecutive541 +
