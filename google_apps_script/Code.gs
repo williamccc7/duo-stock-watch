@@ -24,9 +24,21 @@ function recipient_() {
   return email;
 }
 
+// Use a private Apps Script property rather than publishing recipients in a public repository.
+// Set ADDITIONAL_ALERT_EMAILS in Apps Script Project Settings -> Script Properties.
+function recipients_() {
+  const primary = recipient_();
+  const extras = (PropertiesService.getScriptProperties()
+    .getProperty("ADDITIONAL_ALERT_EMAILS") || "")
+    .split(/[;,]/)
+    .map(email => email.trim())
+    .filter(Boolean);
+  return Array.from(new Set([primary, ...extras])).join(",");
+}
+
 function testEmail() {
   MailApp.sendEmail({
-    to: recipient_(),
+    to: recipients_(),
     subject: "TEST — iPhone Duo two-store stock monitor",
     body: "Test only. Evergreen Walk and Westfarms are now configured. This is not a stock alert."
   });
@@ -95,7 +107,7 @@ function evaluateStore_(stores, config, props) {
 
   if (available && !wasAvailable) {
     MailApp.sendEmail({
-      to: recipient_(),
+      to: recipients_(),
       subject: "🚨 iPhone Duo 白色 256GB — Apple " + config.name + " 有货！",
       body: "Apple " + config.name + " 可能有以下配置可到店自取：\n" +
             CONFIG.title + "\n" +
@@ -171,7 +183,7 @@ function checkStock() {
     if (errors >= 3 && now - lastAlert > 6 * 60 * 60 * 1000) {
       try {
         MailApp.sendEmail({
-          to: recipient_(),
+          to: recipients_(),
           subject: "⚠️ iPhone Duo 两店库存监控遇到错误",
           body: "连续 " + errors + " 次检查出现错误。这不意味着没有库存。\n" +
                 "请在 Google Apps Script 查看执行日志。\n\n" +
