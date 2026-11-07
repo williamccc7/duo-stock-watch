@@ -159,10 +159,10 @@ def check():
                 previous = state.get("was_available", False)
             if available and not previous:
                 message = (
-                    f'Apple {name} has iPhone Duo 256GB Star White available for pickup!\\n'
-                    + target["address"] + "\\n"
-                    + "No trade-in; connect to any carrier later. Confirm during Apple checkout.\\n"
-                    + "Stock may change quickly.\\n" + BUY_URL
+                    f'Apple {name} has iPhone Duo 256GB Star White available for pickup!\n'
+                    + target["address"] + "\n"
+                    + "No trade-in; connect to any carrier later. Confirm during Apple checkout.\n"
+                    + "Stock may change quickly.\n" + BUY_URL
                 )
                 notify(f"🚨 iPhone Duo AVAILABLE — {name}", message)
             elif available:
