@@ -27,7 +27,7 @@ GitHub 的修改不会自动同步到现有的 Apps Script 项目！请在 Googl
 
 - Google Apps Script 定时调度和 Apple 库存接口都不保证每分钟准时或永远可用。
 - 每分钟只有 1 次网络请求，按计划每天最多 1440 次；仍受 Google 免费配额限制。
-- Apple 返回 HTTP 541 时可能暂停请求 15–60 分钟；这种时候不能视为缺货。
+- Apple 连续返回 HTTP 541 时，按 5 → 10 → 15 分钟递增暂停请求（最多 15 分钟）；这种时候不能视为缺货。
 - 若要暂停脚本，选择 `stopMonitoring` 并执行；Google 的触发器会被删除。
 
 ## 同时通知另一个 Gmail 收件人
