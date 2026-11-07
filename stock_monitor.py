@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check Apple Evergreen Walk pickup stock for iPhone Duo 256GB Star White.
+"""Check Evergreen Walk and Westfarms pickup stock for iPhone Duo 256GB Star White.
 
 Uses Apple's public but undocumented pickup JSON endpoint.
 Never places an order. No external Python dependencies.
@@ -16,8 +16,10 @@ from email.message import EmailMessage
 from pathlib import Path
 
 PART = "MK1E4LL/A"
-STORE = "R613"
-STORE_NAME = "Evergreen Walk"
+STORES = [
+    {"number": "R613", "name": "Evergreen Walk", "zip": "06066", "address": "401 Evergreen Walk, South Windsor, CT 06074"},
+    {"number": "R025", "name": "Westfarms", "zip": "06032", "address": "500 Westfarms Mall, Farmington, CT 06032"},
+]
 PRODUCT_TITLE = "iPhone Duo 256GB Star White"
 BUY_URL = "https://www.apple.com/shop/buy-iphone/iphone-duo/7.6-inch-display-256gb-star-white-unlocked"
 ENDPOINT = "https://www.apple.com/shop/retail/pickup-message"
@@ -28,10 +30,10 @@ def log(message):
     print(f"[{datetime.now(timezone.utc).isoformat(timespec='seconds')}] {message}", flush=True)
 
 
-def fetch_stock():
+def fetch_stock(target):
     query = urllib.parse.urlencode({
         "pl": "true",
-        "location": "06066",
+        "location": target["zip"],
         "parts.0": PART,
     })
     request = urllib.request.Request(
@@ -45,20 +47,20 @@ def fetch_stock():
     )
     with urllib.request.urlopen(request, timeout=20) as response:
         data = json.load(response)
-    return parse_stock(data)
+    return parse_stock(data, target)
 
 
-def parse_stock(data):
+def parse_stock(data, target):
     if not isinstance(data, dict) or str(data.get("head", {}).get("status")) != "200":
         raise ValueError("Apple did not return status 200")
     stores = data.get("body", {}).get("stores")
     if not isinstance(stores, list):
         raise ValueError("Missing store list; endpoint may have changed")
-    matches = [s for s in stores if s.get("storeNumber") == STORE]
+    matches = [s for s in stores if s.get("storeNumber") == target["number"]]
     if len(matches) != 1:
-        raise ValueError("Target store R613 not found; not treating as out of stock")
+        raise ValueError(f'Target store {target["number"]} not found; not treating as out of stock')
     store = matches[0]
-    if store.get("storeName") != STORE_NAME:
+    if store.get("storeName") != target["name"]:
         raise ValueError("Store name/number do not match")
     item = store.get("partsAvailability", {}).get(PART)
     if not isinstance(item, dict):
@@ -144,24 +146,37 @@ def write_state(state):
 
 def check():
     require_gmail_secrets()
-    available, quote = fetch_stock()
     state = read_state()
-    log("Apple Evergreen Walk pickup: " + ("AVAILABLE" if available else "unavailable") + " / " + quote)
-    if not available:
-        state["was_available"] = False
-    elif not state.get("was_available"):
-        message = (
-            "Apple Evergreen Walk has iPhone Duo 256GB Star White available for pickup!\n"
-            "401 Evergreen Walk, South Windsor, CT 06074\n"
-            "No trade-in; connect to any carrier later. Confirm during Apple checkout.\n"
-            "Stock may change quickly.\n" + BUY_URL
-        )
-        notify("🚨 iPhone Duo AVAILABLE — Evergreen Walk", message)
-        state["was_available"] = True
-    else:
-        log("Stock still available; no repeated alert")
-    state["last_checked_utc"] = datetime.now(timezone.utc).isoformat()
-    write_state(state)
+    failures = []
+    for target in STORES:
+        name = target["name"]
+        key = target["number"]
+        try:
+            available, quote = fetch_stock(target)
+            log("Apple " + name + " pickup: " + ("AVAILABLE" if available else "unavailable") + " / " + quote)
+            previous = state.get(key, {}).get("was_available")
+            if previous is None and key == "R613":
+                previous = state.get("was_available", False)
+            if available and not previous:
+                message = (
+                    f'Apple {name} has iPhone Duo 256GB Star White available for pickup!\\n'
+                    + target["address"] + "\\n"
+                    + "No trade-in; connect to any carrier later. Confirm during Apple checkout.\\n"
+                    + "Stock may change quickly.\\n" + BUY_URL
+                )
+                notify(f"🚨 iPhone Duo AVAILABLE — {name}", message)
+            elif available:
+                log(name + " still available; no repeated alert")
+            state[key] = {
+                "was_available": available,
+                "last_checked_utc": datetime.now(timezone.utc).isoformat()
+            }
+            write_state(state)
+        except Exception as exc:
+            failures.append(f"{name}: {type(exc).__name__}: {exc}")
+            log("ERROR " + failures[-1] + " (not treating as out of stock)")
+    if failures:
+        raise RuntimeError("; ".join(failures))
 
 
 def main():
@@ -170,7 +185,7 @@ def main():
     args = parser.parse_args()
     if args.test_notification:
         require_gmail_secrets()
-        notify("Gmail TEST — iPhone Duo Evergreen Walk",
+        notify("Gmail TEST — iPhone Duo (Evergreen Walk + Westfarms)",
                "This is a test email sent by your GitHub Actions stock monitor. It does NOT mean the iPhone is in stock.")
     else:
         check()
