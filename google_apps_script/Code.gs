@@ -1,175 +1,185 @@
 /**
- * iPhone Duo · Apple Evergreen Walk · 5-minute pickup stock watch
+ * iPhone Duo 256GB Star White | Evergreen Walk + Westfarms
  *
- * Paste into a private Google Apps Script project linked to your Gmail account.
- * Uses no passwords and never attempts to purchase a phone.
- *
- * After pasting:
- *   1. Run testEmail() and authorize Google permissions.
- *   2. Run checkStock() once; review Execution log.
- *   3. Run startEveryFiveMinutes() once to install a 5-minute trigger.
- *   4. Later, run stopMonitoring() to stop.
+ * One inventory request checks both stores. Alerts are tracked separately.
+ * Uses the existing checkStock time-driven trigger; NO extra trigger is needed.
  */
-
 const CONFIG = {
   sku: "MK1E4LL/A",
-  storeNumber: "R613",
-  storeName: "Evergreen Walk",
   title: "iPhone Duo 256GB Star White",
-  zipCode: "06066",
+  zipCode: "06032",
   purchaseUrl: "https://www.apple.com/shop/buy-iphone/iphone-duo",
-  appleUrl: "https://www.apple.com/shop/retail/pickup-message"
+  appleUrl: "https://www.apple.com/shop/retail/pickup-message",
+  stores: [
+    { number: "R613", name: "Evergreen Walk",
+      address: "401 Evergreen Walk, South Windsor, CT 06074" },
+    { number: "R025", name: "Westfarms",
+      address: "500 Westfarms Mall, Farmington, CT 06032" }
+  ]
 };
 
 function recipient_() {
-  // A time-triggered script runs as the Google user who installed it.
   const email = Session.getEffectiveUser().getEmail();
-  if (!email) {
-    throw new Error("Could not identify your Gmail address. Sign in to the intended Google account.");
-  }
+  if (!email) throw new Error("Cannot determine Gmail account.");
   return email;
 }
 
 function testEmail() {
   MailApp.sendEmail({
     to: recipient_(),
-    subject: "TEST — iPhone Duo 5-minute monitor",
-    body: "This is a test message only. The phone has NOT been confirmed in stock.\n" +
-          "After receiving this, run checkStock() once, then startEveryFiveMinutes()."
+    subject: "TEST — iPhone Duo two-store stock monitor",
+    body: "Test only. Evergreen Walk and Westfarms are now configured. This is not a stock alert."
   });
-  console.log("Test email submitted to Gmail.");
+  console.log("Test email submitted.");
+}
+
+function readAppleInventory_() {
+  // Apple returns Westfarms AND Evergreen Walk in the same response for 06032.
+  const query = "?pl=true&location=" + encodeURIComponent(CONFIG.zipCode) +
+                "&parts.0=" + encodeURIComponent(CONFIG.sku);
+  const res = UrlFetchApp.fetch(CONFIG.appleUrl + query, {
+    method: "get",
+    muteHttpExceptions: true,
+    followRedirects: true,
+    headers: {
+      "Accept": "application/json, text/plain, */*",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Referer": CONFIG.purchaseUrl
+    }
+  });
+  const http = res.getResponseCode();
+  if (http !== 200) {
+    throw new Error("Apple returned HTTP " + http + ". Do not interpret as out of stock.");
+  }
+  let data;
+  try {
+    data = JSON.parse(res.getContentText());
+  } catch (err) {
+    throw new Error("Apple returned invalid JSON.");
+  }
+  if (!data || !data.head || String(data.head.status) !== "200" ||
+      !data.body || !Array.isArray(data.body.stores)) {
+    throw new Error("Apple response structure changed or is incomplete.");
+  }
+  return data.body.stores;
+}
+
+function evaluateStore_(stores, config, props) {
+  const matches = stores.filter(s => s.storeNumber === config.number);
+  if (matches.length !== 1 || matches[0].storeName !== config.name) {
+    throw new Error(config.name + " missing or mismatched in Apple inventory response.");
+  }
+  const item = matches[0].partsAvailability &&
+               matches[0].partsAvailability[CONFIG.sku];
+  if (!item) throw new Error(config.name + ": requested SKU missing.");
+  const title = item.messageTypes && item.messageTypes.regular &&
+                item.messageTypes.regular.storePickupProductTitle;
+  if (title && title.trim().toLowerCase() !== CONFIG.title.toLowerCase()) {
+    throw new Error(config.name + ": product title mismatch: " + title);
+  }
+  const display = item.pickupDisplay;
+  if (display !== "available" && display !== "unavailable") {
+    throw new Error(config.name + ": unexpected pickup status: " + display);
+  }
+  if (display === "available" && item.storePickEligible !== true) {
+    throw new Error(config.name + ": pickup eligibility not confirmed.");
+  }
+
+  const available = display === "available";
+  const key = "wasAvailable_" + config.number;
+  const previous = props.getProperty(key);
+  // Keep the original Evergreen Walk status when upgrading from the old script.
+  const wasAvailable = previous === null && config.number === "R613"
+    ? props.getProperty("wasAvailable") === "true"
+    : previous === "true";
+
+  if (available && !wasAvailable) {
+    MailApp.sendEmail({
+      to: recipient_(),
+      subject: "🚨 iPhone Duo 白色 256GB — Apple " + config.name + " 有货！",
+      body: "Apple " + config.name + " 可能有以下配置可到店自取：\n" +
+            CONFIG.title + "\n" +
+            "No Trade-in · Connect to any carrier later（购买时确认）\n" +
+            "门店：" + config.address + "\n\n" +
+            "立即前往 Apple 官网确认：\n" + CONFIG.purchaseUrl + "\n\n" +
+            "库存随时可能变化，本提醒不等于已经预留。"
+    });
+    console.log(config.name + ": NEW STOCK — Gmail alert sent!");
+  } else {
+    console.log(config.name + ": " +
+      (available ? "Still available; repeat email suppressed." : "Currently unavailable."));
+  }
+  // Persist each store independently; one store cannot overwrite the other.
+  props.setProperties({
+    [key]: String(available),
+    ["lastPickupDisplay_" + config.number]: display,
+    ["lastSuccessfulCheck_" + config.number]: new Date().toISOString()
+  });
 }
 
 function checkStock() {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) {
-    console.log("Previous check is still running. Skipped to avoid overlap.");
+    console.log("Previous check still running; skip overlapping execution.");
     return;
   }
-  const state = PropertiesService.getScriptProperties();
+  const props = PropertiesService.getScriptProperties();
   try {
-    // A 541 can signal Apple temporarily blocking this shared network route.
-    // Do not hammer the service with immediate retries.
-    const cooldownUntil = Number(state.getProperty("cooldownUntil") || "0");
-    if (Date.now() < cooldownUntil) {
-      console.warn("Apple HTTP 541 cooldown active; next eligible query after " +
-                   new Date(cooldownUntil).toISOString());
+    const until = Number(props.getProperty("cooldownUntil") || "0");
+    if (Date.now() < until) {
+      console.warn("Apple HTTP 541 cooldown active until " +
+                   new Date(until).toISOString());
       return;
     }
-    const query = "?pl=true&location=" + encodeURIComponent(CONFIG.zipCode) +
-                  "&parts.0=" + encodeURIComponent(CONFIG.sku);
-    const res = UrlFetchApp.fetch(CONFIG.appleUrl + query, {
-      method: "get",
-      muteHttpExceptions: true,
-      followRedirects: true,
-      headers: {
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": CONFIG.purchaseUrl
+    const stores = readAppleInventory_();
+    const errors = [];
+    for (const store of CONFIG.stores) {
+      try {
+        evaluateStore_(stores, store, props);
+      } catch (err) {
+        console.error("Store error: " + String(err));
+        errors.push(String(err));
       }
-    });
-
-    const code = res.getResponseCode();
-    if (code !== 200) {
-      throw new Error("Apple returned HTTP " + code + ". Do not interpret as out of stock.");
     }
-
-    let data;
-    try {
-      data = JSON.parse(res.getContentText());
-    } catch (e) {
-      throw new Error("Apple returned non-JSON data; its endpoint may have changed.");
+    if (errors.length) {
+      // Successful stores were updated. An unknown store is not treated as out of stock.
+      throw new Error("Incomplete store checks: " + errors.join("; "));
     }
-    if (!data || !data.head || String(data.head.status) !== "200" ||
-        !data.body || !Array.isArray(data.body.stores)) {
-      throw new Error("Apple inventory response structure is unexpected.");
-    }
-
-    const stores = data.body.stores.filter(s => s.storeNumber === CONFIG.storeNumber);
-    if (stores.length !== 1 || stores[0].storeName !== CONFIG.storeName) {
-      throw new Error("Target Apple Evergreen Walk store not found or mismatched.");
-    }
-
-    const store = stores[0];
-    const item = store.partsAvailability && store.partsAvailability[CONFIG.sku];
-    if (!item) {
-      throw new Error("Requested SKU missing from store inventory response.");
-    }
-    const title = item.messageTypes &&
-                  item.messageTypes.regular &&
-                  item.messageTypes.regular.storePickupProductTitle;
-    if (title && title.trim().toLowerCase() !== CONFIG.title.toLowerCase()) {
-      throw new Error("SKU product title mismatch: " + title);
-    }
-
-    if (item.pickupDisplay !== "available" && item.pickupDisplay !== "unavailable") {
-      throw new Error("Unrecognized pickup status: " + item.pickupDisplay);
-    }
-    if (item.pickupDisplay === "available" && item.storePickEligible !== true) {
-      throw new Error("Available status without Store Pickup eligibility.");
-    }
-
-    const available = item.pickupDisplay === "available";
-    const wasAvailable = state.getProperty("wasAvailable") === "true";
-
-    if (available && !wasAvailable) {
-      MailApp.sendEmail({
-        to: recipient_(),
-        subject: "🚨 iPhone Duo 白色 256GB — Evergreen Walk 有货！",
-        body: "Apple Evergreen Walk 可能有以下配置可到店自取：\n" +
-              "iPhone Duo · Star White · 256GB\n" +
-              "No Trade-in · Connect to any carrier later（购买时确认）\n" +
-              "门店：Apple Evergreen Walk · R613\n\n" +
-              "请尽快通过 Apple 官网确认并下单：\n" + CONFIG.purchaseUrl +
-              "\n\n库存可能很快变化；本邮件不代表已经预留商品。"
-      });
-      console.log("New stock found; Gmail alert sent.");
-    } else {
-      console.log(available ? "Still available; repeated alert suppressed." : "Currently unavailable.");
-    }
-
-    state.setProperties({
-      wasAvailable: String(available),
+    props.setProperties({
       lastSuccessfulCheck: new Date().toISOString(),
-      lastPickupDisplay: item.pickupDisplay,
       consecutiveErrors: "0",
       consecutive541: "0",
       cooldownUntil: "0"
     });
   } catch (err) {
     console.error("Inventory check failed: " + String(err));
-    const errors = Number(state.getProperty("consecutiveErrors") || 0) + 1;
-    state.setProperty("consecutiveErrors", String(errors));
+    const errors = Number(props.getProperty("consecutiveErrors") || "0") + 1;
+    props.setProperty("consecutiveErrors", String(errors));
     const now = Date.now();
     const is541 = String(err).includes("Apple returned HTTP 541");
-    const consecutive541 = is541 ?
-      Number(state.getProperty("consecutive541") || "0") + 1 : 0;
-    state.setProperty("consecutive541", String(consecutive541));
+    const consecutive541 = is541
+      ? Number(props.getProperty("consecutive541") || "0") + 1 : 0;
+    props.setProperty("consecutive541", String(consecutive541));
     if (consecutive541 >= 2) {
-      // 2nd consecutive 541: 15-min cooldown; 3rd: 30; later: 60.
-      // During cooldown, availability is unknown (never assumed out of stock).
-      const cooldownMinutes = Math.min(60, 15 * Math.pow(2, consecutive541 - 2));
-      const until = now + cooldownMinutes * 60 * 1000;
-      state.setProperty("cooldownUntil", String(until));
-      console.warn("Apple HTTP 541 received " + consecutive541 +
-                   " times consecutively; pausing queries for " +
-                   cooldownMinutes + " minutes, until " + new Date(until).toISOString());
+      const minutes = Math.min(60, 15 * Math.pow(2, consecutive541 - 2));
+      const until = now + minutes * 60000;
+      props.setProperty("cooldownUntil", String(until));
+      console.warn("HTTP 541 repeated " + consecutive541 +
+                   " times; pausing for " + minutes + " minutes.");
     }
-    const lastAlert = Number(state.getProperty("lastErrorMail") || "0");
-
-    // If Apple changes the endpoint, explain the outage without spamming Gmail.
+    const lastAlert = Number(props.getProperty("lastErrorMail") || "0");
     if (errors >= 3 && now - lastAlert > 6 * 60 * 60 * 1000) {
       try {
         MailApp.sendEmail({
           to: recipient_(),
-          subject: "⚠️ iPhone Duo 库存监控遇到错误",
-          body: "连续 " + errors + " 次库存查询失败。\n" +
-                "这不意味着没有库存，请检查 Google Apps Script 的运行记录。\n\n" +
-                "最新错误：" + String(err).slice(0, 450)
+          subject: "⚠️ iPhone Duo 两店库存监控遇到错误",
+          body: "连续 " + errors + " 次检查出现错误。这不意味着没有库存。\n" +
+                "请在 Google Apps Script 查看执行日志。\n\n" +
+                "错误：" + String(err).slice(0, 500)
         });
-        state.setProperty("lastErrorMail", String(now));
-      } catch (mailError) {
-        console.error("Could not send error email: " + String(mailError));
+        props.setProperty("lastErrorMail", String(now));
+      } catch (mailErr) {
+        console.error("Could not send error email: " + String(mailErr));
       }
     }
   } finally {
@@ -177,15 +187,15 @@ function checkStock() {
   }
 }
 
-function startEveryFiveMinutes() {
-  // Idempotent: delete any previous copy so it cannot alert twice per interval.
+function startEveryMinute() {
+  // Optional reinstall; NOT needed when an existing checkStock trigger works.
   for (const trigger of ScriptApp.getProjectTriggers()) {
     if (trigger.getHandlerFunction() === "checkStock") {
       ScriptApp.deleteTrigger(trigger);
     }
   }
-  ScriptApp.newTrigger("checkStock").timeBased().everyMinutes(5).create();
-  console.log("5-minute Google Apps Script trigger installed.");
+  ScriptApp.newTrigger("checkStock").timeBased().everyMinutes(1).create();
+  console.log("One-minute stock trigger installed.");
 }
 
 function stopMonitoring() {
@@ -194,18 +204,22 @@ function stopMonitoring() {
       ScriptApp.deleteTrigger(trigger);
     }
   }
-  console.log("5-minute monitor stopped.");
+  console.log("Monitoring stopped.");
 }
 
 function showStatus() {
-  const props = PropertiesService.getScriptProperties().getProperties();
-  console.log("Last successful check: " + (props.lastSuccessfulCheck || "never"));
-  console.log("Pickup status: " + (props.lastPickupDisplay || "unknown"));
-  console.log("Consecutive errors: " + (props.consecutiveErrors || "0"));
-  console.log("Consecutive HTTP 541: " + (props.consecutive541 || "0"));
-  const cooldownUntil = Number(props.cooldownUntil || "0");
+  const p = PropertiesService.getScriptProperties().getProperties();
+  for (const store of CONFIG.stores) {
+    console.log(store.name + ": " +
+      (p["lastPickupDisplay_" + store.number] || "not yet checked") +
+      " / last checked " + (p["lastSuccessfulCheck_" + store.number] || "never"));
+  }
+  console.log("Consecutive errors: " + (p.consecutiveErrors || "0"));
+  console.log("Consecutive 541: " + (p.consecutive541 || "0"));
+  const until = Number(p.cooldownUntil || "0");
   console.log("Cooldown: " +
-    (cooldownUntil > Date.now() ? "until " + new Date(cooldownUntil).toISOString() : "not active"));
-  console.log("Triggers installed: " + ScriptApp.getProjectTriggers()
-    .filter(t => t.getHandlerFunction() === "checkStock").length);
+    (until > Date.now() ? "until " + new Date(until).toISOString() : "not active"));
+  console.log("Number of checkStock triggers: " +
+    ScriptApp.getProjectTriggers().filter(
+      t => t.getHandlerFunction() === "checkStock").length);
 }
