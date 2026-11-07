@@ -29,3 +29,16 @@ GitHub 的修改不会自动同步到现有的 Apps Script 项目！请在 Googl
 - 每分钟只有 1 次网络请求，按计划每天最多 1440 次；仍受 Google 免费配额限制。
 - Apple 返回 HTTP 541 时可能暂停请求 15–60 分钟；这种时候不能视为缺货。
 - 若要暂停脚本，选择 `stopMonitoring` 并执行；Google 的触发器会被删除。
+
+## 同时通知另一个 Gmail 收件人
+
+**不要把其他人的邮箱写进公开 GitHub 仓库。** 在 Google Apps Script 项目中配置私有的 Script Property：
+
+1. 打开现有 Google Apps Script 项目，按上面的说明用最新版 GitHub `Code.gs` 覆盖旧代码并保存。**不要重新运行 `startEveryMinute`，原本的 `checkStock` 时间触发器继续使用。**
+2. 左侧 **Project Settings（齿轮）→ Script properties → Add script property**。
+3. Property 填写 `ADDITIONAL_ALERT_EMAILS`。
+4. Value 填写第二位收件人的邮箱地址（如果有多个，用英文逗号分隔）。
+5. 点击 **Save script properties**。
+6. 在编辑器函数下拉菜单选择 `testEmail`，点击 **Run**。主账户邮箱与额外邮箱都应收到测试邮件；以后两家店的有货邮件以及监控故障邮件也发给双方。
+
+注意：邮箱属于 Script Properties，**不会**被同步到公开 GitHub。Google 每日邮件接收人数额度会按收件人数统计；一次发送到两个人占用 2 个收件人额度。
