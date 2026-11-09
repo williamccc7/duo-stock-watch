@@ -9,7 +9,7 @@
  * Stores: Evergreen Walk (South Windsor), Westfarms (Farmington).
  * Alerts: project owner + optional ADDITIONAL_ALERT_EMAILS Script Property.
  *
- * Install: testEmail -> testParser -> testRadarSource -> startEveryMinute.
+ * Install: testEmail -> testParser -> diagnoseRadarOnce (when needed) -> testRadarSource -> startEveryMinute.
  * No Deployment is required.
  */
 
@@ -192,6 +192,66 @@ function testRadarSource() {
       console.error("RADAR SOURCE FAILED: " + String(err));
     }
   });
+}
+
+/**
+ * One-request 429 diagnostic for Evergreen Walk. Manual run ONLY.
+ * No retries, no state changes, no emails, no scheduler changes.
+ * Used to identify normal rate-limit headers for the authorized site owner.
+ */
+function diagnoseRadarOnce() {
+  const store = RADAR_CONFIG.stores[0]; // Evergreen Walk only
+  console.log("RADAR DIAGNOSTIC: " + store.name + " (ONE request, no retry).");
+  const response = UrlFetchApp.fetch(store.url, {
+    method: "get",
+    followRedirects: true,
+    muteHttpExceptions: true,
+    headers: {
+      "Accept": "text/html",
+      "Cache-Control": "no-cache"
+    }
+  });
+  const status = response.getResponseCode();
+  console.log("HTTP status: " + status);
+  const headers = response.getAllHeaders();
+  const interesting = [
+    "retry-after", "server", "content-type", "cf-ray",
+    "ratelimit-limit", "ratelimit-remaining", "ratelimit-reset",
+    "x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset",
+    "via", "x-cache"
+  ];
+  const selected = {};
+  Object.keys(headers).forEach(k => {
+    if (interesting.indexOf(k.toLowerCase()) !== -1) {
+      selected[k] = String(headers[k]).slice(0, 180);
+    }
+  });
+  console.log("Selected response headers: " + JSON.stringify(selected));
+  const raw = response.getContentText();
+  console.log("Response body length: " + raw.length);
+  if (status !== 200) {
+    // Never log cookies, credentials, full HTML, scripts, or long URLs.
+    const excerpt = raw
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, " ")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
+      .replace(/<head\b[^>]*>[\s\S]*?<\/head\s*>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/https?:\/\/\S+/gi, "[URL]")
+      .replace(/[A-Z0-9_-]{32,}/gi, "[redacted]")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 180);
+    console.log("Short error-body excerpt: " + (excerpt || "[empty or HTML-only]"));
+  }
+  if (status === 429) {
+    console.warn("HTTP 429 received. Do NOT keep rerunning the test. " +
+                 "Respect Retry-After (if supplied); consult the site operator.");
+  } else if (status === 200) {
+    console.log("HTTP 200 received. This does NOT yet prove that the inventory parser works. " +
+                "Run testRadarSource only after the site owner confirms the access conditions.");
+  } else {
+    console.warn("Unexpected HTTP status; provide the selected headers to the site owner.");
+  }
 }
 
 function checkRadarStock() {
