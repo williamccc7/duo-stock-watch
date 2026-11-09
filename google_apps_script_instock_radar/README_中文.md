@@ -65,3 +65,15 @@ https://instockradar.com/us/store/westfarms
 - 新版每轮额外发起两个网页请求，按计划每天 2,880 次；旧版仍另行查询。关注 Google Apps Script 所有项目共享的免费额度、累计触发器运行时间及邮件限额。
 - 有货提醒必须以 Apple 官网实际可预约的库存为准；No trade-in 和 Connect to any carrier later 要在 Apple 结账时确认。
 - 若要停止新版，在新项目运行 stopMonitoring 或删除该项目的 checkRadarStock 触发器；旧版不受影响。
+
+## HTTP 429：一次性诊断（新版）
+
+如果 testRadarSource 两家都返回 HTTP 429，请不要反复运行自动检查，也不要开启 startEveryMinute。
+
+1. 打开 https://github.com/williamccc7/duo-stock-watch/blob/main/google_apps_script_instock_radar/Code.gs ，点击 Raw 复制最新版代码。
+2. 在**第二个** Google Apps Script 项目（InStock Radar Monitor）的 Code.gs 内全选并替换，保存。
+3. 函数选择菜单找到 diagnoseRadarOnce → Run。它只向 Evergreen Walk 页面发**一次**请求，不自动重试、不发邮件、不创建定时触发器。
+4. 查看 Execution log 中的 HTTP status、Selected response headers、Response body length、Short error-body excerpt。
+5. 如果仍然是 429，不要反复运行；将状态与选中的响应头发给网站负责人（最好遵守 Retry-After 等限制）。也可把截图发回对话排查。
+
+这个诊断不能解除限制或绕过反爬规则，只是辨别限流来源/响应信息。原 Apple 监控完全不变。
