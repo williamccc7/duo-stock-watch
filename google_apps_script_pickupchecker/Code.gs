@@ -285,19 +285,19 @@ function checkPickupStock() {
 }
 
 function startEveryMinute() {
-  // Only modifies triggers in THIS PickupChecker project, never the Apple project.
+  // Only modifies triggers in THIS second project (removes any old Radar trigger).
   for (const trigger of ScriptApp.getProjectTriggers()) {
-    if (trigger.getHandlerFunction() === "checkPickupStock") {
+    if (["checkPickupStock", "checkRadarStock"].includes(trigger.getHandlerFunction())) {
       ScriptApp.deleteTrigger(trigger);
     }
   }
   ScriptApp.newTrigger("checkPickupStock").timeBased().everyMinutes(1).create();
-  console.log("PickupChecker: one-minute time-based trigger installed.");
+  console.log("PickupChecker: one-minute time-based trigger installed; old Radar triggers removed.");
 }
 
 function stopMonitoring() {
   for (const trigger of ScriptApp.getProjectTriggers()) {
-    if (trigger.getHandlerFunction() === "checkPickupStock") {
+    if (["checkPickupStock", "checkRadarStock"].includes(trigger.getHandlerFunction())) {
       ScriptApp.deleteTrigger(trigger);
     }
   }
